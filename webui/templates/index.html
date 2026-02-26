@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cartoon Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:      #080b10;
+  --panel:   #0d1117;
+  --border:  #1e2630;
+  --border2: #2a3441;
+  --text:    #c9d1d9;
+  --muted:   #4a5568;
+  --dim:     #30363d;
+
+  --orange:  #ff6b35;
+  --purple:  #a855f7;
+  --cyan:    #22d3ee;
+  --green:   #4ade80;
+  --red:     #f87171;
+  --yellow:  #fbbf24;
+  --pink:    #f472b6;
+
+  --glow-o:  0 0 20px rgba(255,107,53,0.25);
+  --glow-g:  0 0 20px rgba(74,222,128,0.2);
+  --glow-p:  0 0 20px rgba(168,85,247,0.2);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── Layout ──────────────────────────────────────────── */
+.shell {
+  display: grid;
+  grid-template-rows: 52px 1fr;
+  grid-template-columns: 280px 1fr 300px;
+  height: 100vh;
+  gap: 0;
+}
+
+/* ── Header ─────────────────────────────────────────── */
+.header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+
+.header-logo {
+  font-family: 'Syne', sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--orange), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.header-tag {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid var(--border2);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.header-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.status-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.status-dot.ok   { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-dot.warn { background: var(--yellow); }
+.status-dot.err  { background: var(--red); }
+
+/* ── Left sidebar ─────────────────────────────────────── */
+.sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-label {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* Run form */
+.field {
+  margin-bottom: 10px;
+}
+
+.field label {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+.field input[type="text"] {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.field input[type="text"]:focus {
+  border-color: var(--orange);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.toggle {
+  position: relative;
+  width: 34px; height: 18px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-track {
+  position: absolute; inset: 0;
+  background: var(--border2);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle input:checked + .toggle-track { background: var(--orange); }
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  background: white;
+  border-radius: 50%;
+  top: 3px; left: 3px;
+  transition: transform 0.2s;
+}
+.toggle input:checked + .toggle-track::after {
+  transform: translateX(16px);
+}
+
+.btn-run {
+  width: 100%;
+  padding: 10px;
+  background: linear-gradient(135deg, var(--orange), #e55a25);
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  margin-top: 4px;
+}
+.btn-run:hover  { opacity: 0.9; }
+.btn-run:active { transform: scale(0.98); }
+.btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Agent buttons */
+.agent-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.btn-agent {
+  padding: 7px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s, color 0.15s;
+  letter-spacing: 0.04em;
+}
+.btn-agent:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.btn-agent:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Episodes list */
+.episodes-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+.episodes-list::-webkit-scrollbar { width: 4px; }
+.episodes-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.episode-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.episode-item:hover { border-color: var(--border2); background: rgba(255,255,255,0.02); }
+.episode-item.active { border-color: var(--orange); }
+
+.ep-id   { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+.ep-title{ font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ep-meta { font-size: 10px; color: var(--muted); margin-top: 3px; }
+.ep-badge {
+  display: inline-block;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(74,222,128,0.12);
+  color: var(--green);
+  border: 1px solid rgba(74,222,128,0.25);
+  margin-top: 4px;
+}
+
+/* ── Main area ────────────────────────────────────────── */
+.main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* Stage tracker */
+.stage-bar {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.stage-step {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex: 1;
+}
+
+.stage-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 70px;
+}
+
+.stage-icon {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+  transition: all 0.3s;
+  background: var(--panel);
+}
+.stage-icon.done    { border-color: var(--green); color: var(--green); background: rgba(74,222,128,0.08); }
+.stage-icon.active  { border-color: var(--orange); color: var(--orange); background: rgba(255,107,53,0.1); box-shadow: var(--glow-o); animation: pulse 1.5s infinite; }
+.stage-icon.pending { border-color: var(--border2); color: var(--muted); }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255,107,53,0.3); }
+  50%       { box-shadow: 0 0 20px rgba(255,107,53,0.6); }
+}
+
+.stage-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.stage-connector {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  margin-bottom: 14px;
+  position: relative;
+}
+.stage-connector.done { background: var(--green); }
+.stage-connector.active { background: linear-gradient(90deg, var(--green), var(--border)); }
+
+/* Log terminal */
+.terminal {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.terminal::-webkit-scrollbar { width: 5px; }
+.terminal::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.log-line {
+  display: flex;
+  gap: 12px;
+  padding: 1px 0;
+  animation: fadeIn 0.15s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; } }
+
+.log-ts   { color: var(--muted); flex-shrink: 0; font-size: 11px; }
+.log-msg  { color: var(--text); word-break: break-word; }
+.log-msg.info  { color: var(--text); }
+.log-msg.warn  { color: var(--yellow); }
+.log-msg.error { color: var(--red); }
+.log-msg.done  { color: var(--green); font-weight: 700; }
+.log-msg.step  { color: var(--cyan); }
+
+.terminal-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 60px 0;
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+/* Terminal prompt */
+.terminal-prompt {
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.prompt-sym { color: var(--green); }
+.prompt-cursor {
+  width: 8px; height: 14px;
+  background: var(--text);
+  animation: blink 1s step-end infinite;
+  opacity: 0.7;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── Right panel ──────────────────────────────────────── */
+.detail-panel {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.detail-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.detail-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+.detail-body::-webkit-scrollbar { width: 4px; }
+.detail-body::-webkit-scrollbar-thumb { background: var(--border2); }
+
+.detail-empty {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  padding: 40px 16px;
+  line-height: 1.8;
+}
+
+.detail-section {
+  margin-bottom: 18px;
+}
+.detail-section h4 {
+  font-size: 10px;
+  color: var(--orange);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-size: 11px;
+}
+.detail-key   { color: var(--muted); min-width: 80px; flex-shrink: 0; }
+.detail-value { color: var(--text); word-break: break-all; }
+
+.char-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.char-name { color: var(--cyan); font-weight: 700; margin-bottom: 4px; }
+.char-desc { color: var(--muted); line-height: 1.5; }
+.char-voice {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--purple);
+}
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(34,211,238,0.07);
+  color: var(--cyan);
+  border: 1px solid rgba(34,211,238,0.2);
+}
+
+.seo-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.seo-label { color: var(--muted); font-size: 10px; margin-bottom: 4px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+.btn-small {
+  font-size: 10px;
+  padding: 5px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.btn-small:hover { border-color: var(--orange); color: var(--orange); }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ── HEADER ──────────────────────────────────── -->
+  <header class="header">
+    <span class="header-logo">CARTOON.PIPELINE</span>
+    <span class="header-tag">v0.1.0</span>
+    <span class="header-tag">multi-agent</span>
+
+    <div class="header-status">
+      <div class="status-chip">
+        <div class="status-dot" id="dot-ollama"></div>
+        <span id="lbl-ollama">ollama</span>
+      </div>
+      <div class="status-chip">
+        <div class="status-dot" id="dot-sd"></div>
+        <span id="lbl-sd">sd-webui</span>
+      </div>
+      <div class="status-chip">
+        <div class="status-dot" id="dot-pipeline"></div>
+        <span id="lbl-pipeline">idle</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── LEFT SIDEBAR ────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Run form -->
+    <div class="sidebar-section">
+      <div class="section-label">Run Pipeline</div>
+
+      <div class="field">
+        <label>Genre / tone hint</label>
+        <input type="text" id="genre-input" placeholder="e.g. dark comedy, sci-fi action" />
+      </div>
+
+      <div class="field-row">
+        <span style="font-size:11px;color:var(--muted)">Generate char images</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-images">
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+      <div class="field-row">
+        <span style="font-size:11px;color:var(--muted)">Upload to YouTube</span>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-upload">
+          <div class="toggle-track"></div>
+        </label>
+      </div>
+
+      <button class="btn-run" id="btn-run-full" onclick="runFull()">
+        ▶ Run Full Pipeline
+      </button>
+    </div>
+
+    <!-- Individual agents -->
+    <div class="sidebar-section">
+      <div class="section-label">Run Single Agent</div>
+      <div class="agent-grid">
+        <button class="btn-agent" onclick="runAgent('trend')">01 trend</button>
+        <button class="btn-agent" onclick="runAgent('script')">02 script</button>
+        <button class="btn-agent" onclick="runAgent('character')">03 character</button>
+        <button class="btn-agent" onclick="runAgent('animation')">04 animation</button>
+        <button class="btn-agent" onclick="runAgent('voiceover')">05 voiceover</button>
+        <button class="btn-agent" onclick="runAgent('editor')">06 editor</button>
+      </div>
+    </div>
+
+    <!-- Episode list -->
+    <div class="sidebar-section" style="padding-bottom:8px">
+      <div class="section-label">Episodes</div>
+    </div>
+    <div class="episodes-list" id="episodes-list">
+      <div style="color:var(--muted);font-size:11px;text-align:center;padding:20px 0">
+        No episodes yet
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ── MAIN TERMINAL ────────────────────────────── -->
+  <main class="main">
+
+    <!-- Stage tracker -->
+    <div class="stage-bar">
+      <div class="stage-step" id="stage-0">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-0">01</div>
+          <div class="stage-label">trend</div>
+        </div>
+        <div class="stage-connector" id="sc-0"></div>
+      </div>
+      <div class="stage-step" id="stage-1">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-1">02</div>
+          <div class="stage-label">script</div>
+        </div>
+        <div class="stage-connector" id="sc-1"></div>
+      </div>
+      <div class="stage-step" id="stage-2">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-2">03</div>
+          <div class="stage-label">character</div>
+        </div>
+        <div class="stage-connector" id="sc-2"></div>
+      </div>
+      <div class="stage-step" id="stage-3">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-3">04</div>
+          <div class="stage-label">animation</div>
+        </div>
+        <div class="stage-connector" id="sc-3"></div>
+      </div>
+      <div class="stage-step" id="stage-4">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-4">05</div>
+          <div class="stage-label">voiceover</div>
+        </div>
+        <div class="stage-connector" id="sc-4"></div>
+      </div>
+      <div class="stage-step" id="stage-5">
+        <div class="stage-node">
+          <div class="stage-icon pending" id="si-5">06</div>
+          <div class="stage-label">editor</div>
+        </div>
+        <!-- no connector on last -->
+      </div>
+    </div>
+
+    <!-- Log terminal -->
+    <div class="terminal" id="terminal">
+      <div class="terminal-empty">
+        pipeline idle — configure and run above<br>
+        <span style="color:var(--border2)">logs will appear here in real time</span>
+      </div>
+    </div>
+
+    <div class="terminal-prompt">
+      <span class="prompt-sym">$</span>
+      <span id="prompt-text">cartoon-pipeline</span>
+      <div class="prompt-cursor"></div>
+    </div>
+  </main>
+
+  <!-- ── RIGHT DETAIL PANEL ───────────────────────── -->
+  <aside class="detail-panel">
+    <div class="detail-header">Episode Detail</div>
+    <div class="detail-body" id="detail-body">
+      <div class="detail-empty">
+        Select an episode from the list<br>or run the pipeline to see details
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────
+let ws = null;
+let pipelineRunning = false;
+const stageKeywords = [
+  ['[1/6]', 'trend_research'],
+  ['[2/6]', 'script_writing'],
+  ['[3/6]', 'story_character'],
+  ['[4/6]', 'animation'],
+  ['[5/6]', 'voiceover'],
+  ['[6/6]', 'editor'],
+];
+const stageState = [0,0,0,0,0,0]; // 0=pending 1=active 2=done
+
+// ── Init ────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  connectWS();
+  pollStatus();
+  loadEpisodes();
+  setInterval(pollStatus, 8000);
+  setInterval(loadEpisodes, 15000);
+});
+
+// ── WebSocket ────────────────────────────────────────────────────
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/logs`);
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    handleMessage(msg);
+  };
+
+  ws.onclose = () => {
+    setTimeout(connectWS, 3000);
+  };
+}
+
+function handleMessage(msg) {
+  if (msg.type === 'log' || msg.type === 'status' || msg.type === 'error') {
+    appendLog(msg.msg, msg.type === 'error' ? 'error' : detectLogClass(msg.msg));
+    detectStage(msg.msg);
+  }
+
+  if (msg.type === 'complete') {
+    appendLog(`✓ Done — ${msg.title || 'episode complete'}`, 'done');
+    setRunning(false);
+    allStagesDone();
+    loadEpisodes();
+    if (msg.episode_id) loadEpisodeDetail(msg.episode_id);
+    if (msg.errors && msg.errors.length > 0) {
+      msg.errors.forEach(e => appendLog(`✗ ${e}`, 'error'));
+    }
+  }
+
+  if (msg.type === 'status') {
+    setRunning(msg.status === 'running');
+  }
+}
+
+function detectLogClass(msg) {
+  if (!msg) return 'info';
+  const m = msg.toLowerCase();
+  if (m.includes('error') || m.includes('failed')) return 'error';
+  if (m.includes('warn'))  return 'warn';
+  if (m.includes('done') || m.includes('✓') || m.includes('complete')) return 'done';
+  if (m.includes('[') && m.includes('/6]')) return 'step';
+  return 'info';
+}
+
+function detectStage(msg) {
+  if (!msg) return;
+  stageKeywords.forEach(([key, _], i) => {
+    if (msg.includes(key)) {
+      if (msg.toLowerCase().includes('done') || msg.toLowerCase().includes('complete')) {
+        setStage(i, 'done');
+      } else {
+        setStage(i, 'active');
+      }
+    }
+  });
+}
+
+// ── Stage tracker ────────────────────────────────────────────────
+function setStage(idx, state) {
+  const icon = document.getElementById(`si-${idx}`);
+  const conn = document.getElementById(`sc-${idx}`);
+  if (!icon) return;
+
+  icon.className = `stage-icon ${state}`;
+
+  if (state === 'done') {
+    icon.textContent = '✓';
+    if (conn) conn.className = 'stage-connector done';
+    // activate next
+    if (idx + 1 < 6 && stageState[idx+1] === 0) setStage(idx+1, 'active');
+  } else if (state === 'active') {
+    if (conn) conn.className = 'stage-connector active';
+  }
+
+  stageState[idx] = state === 'done' ? 2 : state === 'active' ? 1 : 0;
+}
+
+function resetStages() {
+  for (let i = 0; i < 6; i++) {
+    const icon = document.getElementById(`si-${i}`);
+    const conn = document.getElementById(`sc-${i}`);
+    if (icon) { icon.className = 'stage-icon pending'; icon.textContent = `0${i+1}`; }
+    if (conn)  conn.className = 'stage-connector';
+    stageState[i] = 0;
+  }
+}
+
+function allStagesDone() {
+  for (let i = 0; i < 6; i++) setStage(i, 'done');
+}
+
+// ── Log terminal ─────────────────────────────────────────────────
+function appendLog(msg, cls = 'info') {
+  const term = document.getElementById('terminal');
+
+  // Remove empty placeholder
+  const empty = term.querySelector('.terminal-empty');
+  if (empty) empty.remove();
+
+  const line = document.createElement('div');
+  line.className = 'log-line';
+
+  const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+  line.innerHTML = `<span class="log-ts">${ts}</span><span class="log-msg ${cls}">${escHtml(msg)}</span>`;
+  term.appendChild(line);
+  term.scrollTop = term.scrollHeight;
+}
+
+function clearLogs() {
+  const term = document.getElementById('terminal');
+  term.innerHTML = '';
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Run pipeline ─────────────────────────────────────────────────
+async function runFull() {
+  if (pipelineRunning) return;
+  clearLogs();
+  resetStages();
+  setRunning(true);
+
+  const genre  = document.getElementById('genre-input').value.trim();
+  const images = document.getElementById('toggle-images').checked;
+  const upload = document.getElementById('toggle-upload').checked;
+
+  appendLog(`▶ Starting pipeline${genre ? ` — genre: "${genre}"` : ''}`, 'step');
+
+  try {
+    const r = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ genre, generate_images: images, upload_to_youtube: upload }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      appendLog(`✗ ${err.error}`, 'error');
+      setRunning(false);
+    }
+  } catch(e) {
+    appendLog(`✗ Failed to reach server: ${e}`, 'error');
+    setRunning(false);
+  }
+}
+
+async function runAgent(agent) {
+  if (pipelineRunning) return;
+  clearLogs();
+  setRunning(true);
+  appendLog(`▶ Running agent: ${agent}`, 'step');
+
+  const genre = document.getElementById('genre-input').value.trim();
+  try {
+    const r = await fetch('/api/run/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent, genre }),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      appendLog(`✗ ${err.error}`, 'error');
+      setRunning(false);
+    }
+  } catch(e) {
+    appendLog(`✗ ${e}`, 'error');
+    setRunning(false);
+  }
+}
+
+// ── Status poll ──────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const d = await r.json();
+
+    // Ollama
+    const dotO = document.getElementById('dot-ollama');
+    const lblO = document.getElementById('lbl-ollama');
+    dotO.className = `status-dot ${d.ollama.available ? 'ok' : 'err'}`;
+    lblO.textContent = d.ollama.available ? `ollama (${d.ollama.models.length} models)` : 'ollama offline';
+
+    // SD
+    const dotS = document.getElementById('dot-sd');
+    dotS.className = `status-dot ${d.stable_diffusion.available ? 'ok' : 'warn'}`;
+
+    // Pipeline
+    if (d.pipeline_running !== pipelineRunning) {
+      setRunning(d.pipeline_running);
+    }
+  } catch(e) { /* server unreachable */ }
+}
+
+function setRunning(running) {
+  pipelineRunning = running;
+  const btn = document.getElementById('btn-run-full');
+  const dot = document.getElementById('dot-pipeline');
+  const lbl = document.getElementById('lbl-pipeline');
+  const agents = document.querySelectorAll('.btn-agent');
+
+  btn.disabled = running;
+  btn.textContent = running ? '⏳ Running...' : '▶ Run Full Pipeline';
+  dot.className = `status-dot ${running ? 'ok' : ''}`;
+  dot.style.animation = running ? 'pulse 1s infinite' : '';
+  lbl.textContent = running ? 'running' : 'idle';
+  agents.forEach(b => b.disabled = running);
+  document.getElementById('prompt-text').textContent = running ? 'cartoon-pipeline — running' : 'cartoon-pipeline';
+}
+
+// ── Episodes ─────────────────────────────────────────────────────
+async function loadEpisodes() {
+  try {
+    const r = await fetch('/api/episodes');
+    const d = await r.json();
+    renderEpisodes(d.episodes || []);
+  } catch(e) {}
+}
+
+function renderEpisodes(episodes) {
+  const list = document.getElementById('episodes-list');
+  if (!episodes.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:11px;text-align:center;padding:20px 0">No episodes yet</div>';
+    return;
+  }
+
+  list.innerHTML = episodes.map(ep => `
+    <div class="episode-item" onclick="loadEpisodeDetail('${ep.id}')">
+      <div class="ep-id">${ep.id}</div>
+      <div class="ep-title">${escHtml(ep.title || '—')}</div>
+      <div class="ep-meta">${ep.scenes ? ep.scenes + ' scenes' : ''} ${ep.genre ? '· ' + ep.genre : ''}</div>
+      ${ep.has_video ? '<div class="ep-badge">✓ video ready</div>' : ''}
+    </div>
+  `).join('');
+}
+
+async function loadEpisodeDetail(id) {
+  // Highlight active
+  document.querySelectorAll('.episode-item').forEach(el => {
+    el.classList.toggle('active', el.querySelector('.ep-id')?.textContent === id);
+  });
+
+  try {
+    const r = await fetch(`/api/episodes/${id}`);
+    const d = await r.json();
+    renderDetail(d);
+  } catch(e) {}
+}
+
+function renderDetail(d) {
+  const body = document.getElementById('detail-body');
+  if (!d || d.error) {
+    body.innerHTML = '<div class="detail-empty">Episode not found</div>';
+    return;
+  }
+
+  const s = d.script || {};
+  const seo = d.seo || {};
+  const chars = d.characters || {};
+
+  let html = '';
+
+  // Script info
+  if (s.title) {
+    html += `
+    <div class="detail-section">
+      <h4>Episode</h4>
+      <div class="detail-row"><span class="detail-key">title</span><span class="detail-value">${escHtml(s.title)}</span></div>
+      <div class="detail-row"><span class="detail-key">scenes</span><span class="detail-value">${s.total_scenes || '—'}</span></div>
+      <div class="detail-row"><span class="detail-key">duration</span><span class="detail-value">${s.estimated_duration_mins ? s.estimated_duration_mins + ' min' : '—'}</span></div>
+      <div class="detail-row"><span class="detail-key">tone</span><span class="detail-value">${escHtml(s.tone || '—')}</span></div>
+    </div>`;
+  }
+
+  // Characters
+  const charList = chars.characters || [];
+  if (charList.length > 0) {
+    html += `<div class="detail-section"><h4>Characters</h4>`;
+    charList.forEach(c => {
+      const v = c.voice_profile || {};
+      html += `
+      <div class="char-card">
+        <div class="char-name">${escHtml(c.name)}</div>
+        <div class="char-desc">${escHtml(c.description || '')}</div>
+        <div class="char-voice">${v.gender || ''} · ${v.quality || ''} · ${v.energy || ''}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // SEO
+  if (seo.yt_title) {
+    html += `
+    <div class="detail-section">
+      <h4>SEO Metadata</h4>
+      <div class="seo-label">YouTube title</div>
+      <div class="seo-box">${escHtml(seo.yt_title)}</div>
+      <div class="seo-label">Tags</div>
+      <div class="tag-list">
+        ${(seo.tags || []).map(t => `<span class="tag">${escHtml(t)}</span>`).join('')}
+      </div>
+    </div>`;
+  }
+
+  // Files
+  const files = d.files || {};
+  const finalFiles = files.final || [];
+  if (finalFiles.length > 0) {
+    html += `
+    <div class="detail-section">
+      <h4>Output Files</h4>
+      ${finalFiles.map(f => `<div class="detail-row"><span class="detail-key">final</span><span class="detail-value">${escHtml(f)}</span></div>`).join('')}
+    </div>`;
+  }
+
+  if (!html) {
+    html = '<div class="detail-empty">No detail data available yet</div>';
+  }
+
+  body.innerHTML = html;
+}
+</script>
+</body>
+</html>
