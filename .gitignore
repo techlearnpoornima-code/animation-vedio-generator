@@ -1,0 +1,37 @@
+# Virtual environment
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment & secrets
+.env
+client_secrets.json
+youtube_token.pickle
+
+# Pipeline output (often large files)
+output/
+logs/
+
+# Stable Diffusion / model weights
+*.ckpt
+*.safetensors
+*.bin
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Build
+dist/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
