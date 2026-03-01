@@ -35,7 +35,7 @@ uv run ruff check .         # lint
 | Trend Researcher | Ollama llama3 + SerpAPI / RSS |
 | Script Writer | Ollama mistral |
 | Story & Character | Ollama llava + Stable Diffusion |
-| Animation | AnimateDiff → Deforum → FFmpeg |
+| Animation | ComfyUI |
 | Voiceover | Coqui XTTS v2 → espeak fallback |
 | Editor | FFmpeg |
 | SEO & Upload | Ollama + YouTube Data API v3 |
