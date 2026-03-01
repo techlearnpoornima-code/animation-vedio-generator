@@ -83,6 +83,12 @@ Minimum passing overall_score: {MIN_CHARACTER_SCORE}"""
         If False, the orchestrator should regenerate the failed stage.
         """
         print("\n[QA] Quality Gate running...")
+
+        # Hard fail: no script means upstream agent crashed — don't continue
+        if not state.script:
+            print("  [QA] FAILED — no script produced (upstream agent error)")
+            return state, False
+
         passed = True
 
         # --- Script scoring ---

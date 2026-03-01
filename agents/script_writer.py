@@ -37,31 +37,49 @@ class ScriptWriter:
         """First pass: generate scene-by-scene outline as JSON."""
         trend = state.trend
 
+        # Simpler schema reduces model confusion and control-char errors
         prompt = f"""Write a cartoon episode outline for:
 Topic: {trend.topic}
 Genre: {trend.genre}
 Tone: {trend.tone}
 Audience: {trend.target_audience}
 Style: {", ".join(trend.style_tags)}
-Hooks to hit: {", ".join(trend.hooks)}
 
-Return a JSON array of scenes (6-10 scenes for ~5 minute episode):
+Return a JSON array of 6 scenes. Keep ALL string values SHORT (under 15 words each).
+No newlines inside string values. Use this exact structure:
 [
   {{
     "scene_num": 1,
-    "location": "brief location description",
-    "characters": ["CharacterName1", "CharacterName2"],
-    "action": "2-3 sentences describing what happens visually",
+    "location": "short location name",
+    "characters": ["Name1", "Name2"],
+    "action": "brief visual action description under 15 words",
     "dialogue": [
-      {{"character": "NAME", "line": "dialogue text"}},
-      {{"character": "NAME", "line": "dialogue text"}}
+      {{"character": "NAME", "line": "short dialogue line"}},
+      {{"character": "NAME", "line": "short dialogue line"}}
     ],
-    "mood": "tense / funny / sad / exciting / eerie",
+    "mood": "tense",
     "duration_secs": 30
   }}
 ]"""
 
-        return self.llm.chat_json(prompt, system=SYSTEM_PROMPT, temperature=0.8)
+        result = self.llm.chat_json(prompt, system=SYSTEM_PROMPT, temperature=0.7)
+
+        # Normalize — model might return dict wrapper
+        if isinstance(result, dict):
+            for key in ("scenes", "episode", "outline", "script"):
+                if key in result and isinstance(result[key], list):
+                    return result[key]
+            # If it's a single scene dict, wrap it
+            if "scene_num" in result:
+                return [result]
+            # Take first list value found
+            for v in result.values():
+                if isinstance(v, list):
+                    return v
+        if isinstance(result, list):
+            return result
+
+        raise ValueError(f"Unexpected scene structure response type: {type(result)}")
 
     # ------------------------------------------------------------------ #
     #  Full script generation                                               #
@@ -104,7 +122,7 @@ Return ONLY the title, nothing else. No quotes."""
     # ------------------------------------------------------------------ #
 
     def _save_script(self, state: EpisodeState) -> str:
-        output_dir = Path(state.output_dir) / state.episode_id / "scripts"
+        output_dir = Path(state.output_dir).resolve() / state.episode_id / "scripts"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Save structured JSON
@@ -138,18 +156,11 @@ Return ONLY the title, nothing else. No quotes."""
         try:
             print("  Generating scene structure...")
             scenes = self._generate_scene_structure(state)
+            print(f"  Got {len(scenes)} scenes. Writing full script...")
 
-            # Handle both list and dict responses from model
-            if isinstance(scenes, dict):
-                scenes = scenes.get("scenes", list(scenes.values())[0] if scenes else [])
-
-            print(f"  Generated {len(scenes)} scenes. Writing full script...")
             raw_script = self._generate_full_script(scenes, state)
-
             title = self._generate_title(state, scenes)
             total_duration = sum(s.get("duration_secs", 30) for s in scenes) / 60
-
-            # Determine episode number from output dir
             ep_num = len(list(Path(state.output_dir).glob("EP_*"))) + 1
 
             state.script = ScriptData(
@@ -173,6 +184,8 @@ Return ONLY the title, nothing else. No quotes."""
         except Exception as e:
             state.add_error("script_writer", str(e))
             print(f"  [script_writer] ERROR: {e}")
+            # Ensure script stays None so quality gate catches it
+            state.script = None
 
         return state
 

@@ -162,36 +162,104 @@ class EditorUploadAgent:
             state.add_error("editor", "FFmpeg not found. Install it: sudo apt install ffmpeg")
             return None
 
+        # Always use resolved absolute paths
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         clips = state.animation.clip_paths if state.animation else []
         audio_files = state.audio.audio_paths if state.audio else []
 
+        # ── No clips at all ─────────────────────────────────────────────
         if not clips:
-            state.add_error("editor", "No video clips to edit.")
+            # If we have audio, produce an audio-only mp4 with a black video track
+            if audio_files:
+                print("  No video clips — producing audio-only episode with black video...")
+                return self._audio_only_video(audio_files, output_dir, state)
+            state.add_error("editor", "No video clips and no audio to edit.")
+            return None
+
+        # ── Filter to clips that actually exist ─────────────────────────
+        existing_clips = [c for c in clips if Path(c).exists()]
+        if not existing_clips:
+            print("  WARN: All clip paths missing from disk — producing audio-only fallback")
+            if audio_files:
+                return self._audio_only_video(audio_files, output_dir, state)
+            state.add_error("editor", "No usable video clips found on disk.")
             return None
 
         sync_dir = output_dir / "synced"
         sync_dir.mkdir(exist_ok=True)
 
         synced_clips = []
-        for i, clip in enumerate(clips):
+        for i, clip in enumerate(existing_clips):
             audio = audio_files[i] if i < len(audio_files) else None
+            # Skip audio paths that don't exist
+            if audio and not Path(audio).exists():
+                audio = None
             sync_out = sync_dir / f"synced_{i:02d}.mp4"
-            print(f"  Syncing scene {i+1}/{len(clips)}...", end=" ", flush=True)
+            print(f"  Syncing scene {i+1}/{len(existing_clips)}...", end=" ", flush=True)
             try:
                 synced = self._sync_clip_to_audio(clip, audio, sync_out)
                 synced_clips.append(synced)
                 print("done")
             except Exception as e:
                 print(f"WARN: {e}")
-                synced_clips.append(clip)  # fallback: use raw clip
+                synced_clips.append(clip)
 
+        trans_dir = output_dir / "transitions"
+        trans_dir.mkdir(exist_ok=True)
         print("  Adding transitions...")
-        final_clips = self._add_transitions(synced_clips, output_dir / "transitions")
-        (output_dir / "transitions").mkdir(exist_ok=True)
+        final_clips = self._add_transitions(synced_clips, trans_dir)
 
         final_path = output_dir / f"{state.episode_id}.mp4"
         print("  Concatenating final video...")
         return self._concat_final(final_clips if final_clips else synced_clips, final_path)
+
+    def _audio_only_video(self, audio_files: list[str], output_dir: Path, state: EpisodeState) -> str | None:
+        """
+        Merge all audio files and pair with a black video track.
+        Used when animation clips are missing but audio was generated.
+        """
+        output_dir = output_dir.resolve()
+        existing_audio = [a for a in audio_files if Path(a).exists()]
+        if not existing_audio:
+            return None
+
+        # Merge audio files into one
+        merged_audio = output_dir / "merged_audio.wav"
+        if len(existing_audio) == 1:
+            import shutil
+            shutil.copy(existing_audio[0], merged_audio)
+        else:
+            list_file = output_dir / "audio_concat_list.txt"
+            with open(list_file, "w") as f:
+                for a in existing_audio:
+                    abs_a = str(Path(a).resolve()).replace("\\", "/")
+                    f.write(f"file '{abs_a}'\n")
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", str(list_file), "-c", "copy", str(merged_audio)
+            ], check=True, capture_output=True)
+            list_file.unlink(missing_ok=True)
+
+        # Get audio duration
+        duration = self._get_audio_duration(str(merged_audio))
+
+        # Create black video + audio
+        final_path = output_dir / f"{state.episode_id}.mp4"
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", f"color=c=black:size=512x512:rate=24",
+            "-i", str(merged_audio),
+            "-c:v", "libx264", "-c:a", "aac",
+            "-t", str(duration),
+            "-pix_fmt", "yuv420p",
+            "-shortest",
+            str(final_path),
+        ], check=True, capture_output=True)
+
+        merged_audio.unlink(missing_ok=True)
+        return str(final_path) if final_path.exists() else None
 
     # ================================================================== #
     #  PART B — SEO METADATA                                               #
@@ -296,7 +364,7 @@ Category IDs: Film & Animation=1, Comedy=23, Education=27"""
     def run(self, state: EpisodeState, upload: bool = False) -> EpisodeState:
         print("\n[6/6] Editor & Upload Agent starting...")
 
-        output_dir = Path(state.output_dir) / state.episode_id / "final"
+        output_dir = Path(state.output_dir).resolve() / state.episode_id / "final"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # --- Edit ---

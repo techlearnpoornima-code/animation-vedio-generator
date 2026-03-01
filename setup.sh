@@ -16,35 +16,35 @@ echo -e "${BOLD}║   Cartoon Pipeline — Project Setup       ║${RESET}"
 echo -e "${BOLD}╚══════════════════════════════════════════╝${RESET}"
 echo ""
 
-# # ── 1. Check uv ────────────────────────────────────────────────────────
-# echo -e "${CYAN}[1/6] Checking uv package manager...${RESET}"
-# if ! command -v uv &>/dev/null; then
-#     echo "  uv not found. Installing..."
-#     curl -LsSf https://astral.sh/uv/install.sh | sh
-#     export PATH="$HOME/.local/bin:$PATH"
-# fi
-# echo -e "  ${GREEN}✓ uv $(uv --version)${RESET}"
+# ── 1. Check uv ────────────────────────────────────────────────────────
+echo -e "${CYAN}[1/6] Checking uv package manager...${RESET}"
+if ! command -v uv &>/dev/null; then
+    echo "  uv not found. Installing..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+fi
+echo -e "  ${GREEN}✓ uv $(uv --version)${RESET}"
 
-# # ── 2. Create virtual environment & install deps ────────────────────────
-# echo ""
-# echo -e "${CYAN}[2/6] Creating virtual environment with uv...${RESET}"
-# uv venv .venv --python 3.11
-# echo -e "  ${GREEN}✓ .venv created (Python 3.11)${RESET}"
+# ── 2. Create virtual environment & install deps ────────────────────────
+echo ""
+echo -e "${CYAN}[2/6] Creating virtual environment with uv...${RESET}"
+uv venv .venv --python 3.11
+echo -e "  ${GREEN}✓ .venv created (Python 3.11)${RESET}"
 
-# echo ""
-# echo -e "${CYAN}[3/6] Installing dependencies...${RESET}"
-# uv pip install -e ".[dev]"
-# echo -e "  ${GREEN}✓ Dependencies installed${RESET}"
+echo ""
+echo -e "${CYAN}[3/6] Installing dependencies...${RESET}"
+uv pip install -e ".[dev]"
+echo -e "  ${GREEN}✓ Dependencies installed${RESET}"
 
 # ── 3. Environment file ─────────────────────────────────────────────────
-# echo ""
-# echo -e "${CYAN}[4/6] Setting up environment config...${RESET}"
-# if [ ! -f .env ]; then
-#     cp .env.example .env
-#     echo -e "  ${YELLOW}⚠  .env created from template — edit it to add your API keys${RESET}"
-# else
-#     echo -e "  ${GREEN}✓ .env already exists${RESET}"
-# fi
+echo ""
+echo -e "${CYAN}[4/6] Setting up environment config...${RESET}"
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo -e "  ${YELLOW}⚠  .env created from template — edit it to add your API keys${RESET}"
+else
+    echo -e "  ${GREEN}✓ .env already exists${RESET}"
+fi
 
 # ── 4. Git init ─────────────────────────────────────────────────────────
 echo ""

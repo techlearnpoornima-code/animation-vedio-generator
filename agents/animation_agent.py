@@ -1,208 +1,192 @@
 """
-agents/animation_agent.py
-Agent 4 — Animation Agent
+agents/animation_agent.py — Agent 4: Animation
 
-Converts scene prompts + character refs into video clips.
-Primary: AnimateDiff via SD WebUI API (local, free)
-Fallback: Deforum script via SD WebUI
-Output: one .mp4 clip per scene saved to output/clips/
+Generates one video clip per scene using ComfyUI.
+
+Backend priority:
+  1. ComfyUI + AnimateDiff-Evolved + VHS  → real animated .mp4 per scene
+  2. ComfyUI + txt2img only               → static image looped to .mp4
+  3. FFmpeg colour-card placeholder        → solid-colour .mp4 (no ComfyUI)
+
+ComfyUI setup instructions:
+  1. Clone: git clone https://github.com/comfyanonymous/ComfyUI
+  2. Install requirements: pip install -r requirements.txt
+  3. Download a checkpoint into ComfyUI/models/checkpoints/
+  4. Start:  python main.py --listen 0.0.0.0 --port 8188
+  5. For AnimateDiff: install via ComfyUI Manager or manually:
+       cd ComfyUI/custom_nodes
+       git clone https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved
+       git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite
+  6. Download motion module into ComfyUI/models/animatediff_models/
+       e.g. mm_sd_v15_v2.ckpt from HuggingFace
+
+All paths use .resolve() — safe when server cwd is "/".
 """
 
 import os
 import json
-import time
-import base64
-import requests
 import subprocess
+import time
 from pathlib import Path
+
 from pipeline.state import EpisodeState, AnimationData
+from pipeline.comfyui_client import ComfyUIClient
+from pipeline.comfyui_workflows import build_animatediff_workflow
 
-SD_API_URL = os.getenv("SD_API_URL", "http://localhost:7860")
-FPS = 24
-CLIP_DURATION_SECS = 4      # default clip length per scene
-RESOLUTION = "512x512"
+COMFYUI_URL      = os.getenv("COMFYUI_URL", "http://localhost:8188")
+FPS              = int(os.getenv("ANIMATION_FPS", "24"))
+CLIP_DURATION    = int(os.getenv("CLIP_DURATION_SECS", "4"))
+RESOLUTION_W     = int(os.getenv("ANIMATION_WIDTH",  "384"))
+RESOLUTION_H     = int(os.getenv("ANIMATION_HEIGHT", "384"))
+RESOLUTION       = f"{RESOLUTION_W}x{RESOLUTION_H}"
 
-
+print("Resolution: ", RESOLUTION)
 class AnimationAgent:
 
     def __init__(self):
-        self.sd_url = SD_API_URL
-        self.fps = FPS
+        self.client = ComfyUIClient(base_url=COMFYUI_URL)
+        self.fps    = FPS
 
-    # ------------------------------------------------------------------ #
-    #  SD availability check                                               #
-    # ------------------------------------------------------------------ #
+    # ── ComfyUI availability ──────────────────────────────────────────────
 
-    def _sd_available(self) -> bool:
+    def _detect_backend(self) -> str:
+        """
+        Returns one of:
+          'animatediff'  — ComfyUI + AnimateDiff-Evolved + VHS available
+          'comfyui'      — ComfyUI available but no AnimateDiff/VHS
+          'ffmpeg'       — ComfyUI not running, use placeholder clips
+        """
+        if not self.client.is_available():
+            return "ffmpeg"
+        if self.client.has_animatediff() and self.client.has_vhs():
+            return "animatediff"
+        return "comfyui"
+
+    # ── AnimateDiff via ComfyUI ───────────────────────────────────────────
+
+    def _render_animatediff(
+        self,
+        prompt: str,
+        scene_num: int,
+        output_dir: Path,
+    ) -> str | None:
+        """
+        Queue an AnimateDiff workflow in ComfyUI, wait for output,
+        download the resulting MP4 to output_dir.
+        """
         try:
-            resp = requests.get(f"{self.sd_url}/sdapi/v1/options", timeout=5)
-            return resp.status_code == 200
-        except Exception:
-            return False
+            
+            workflow, out_type = build_animatediff_workflow(
+                prompt=prompt,
+                client=self.client,
+                scene_num=scene_num,
+                fps=self.fps,
+                duration_secs=CLIP_DURATION,
+                width=RESOLUTION_W,
+                height=RESOLUTION_H,
+                            )
 
-    def _animatediff_available(self) -> bool:
-        """Check if AnimateDiff extension is loaded in SD WebUI."""
-        try:
-            resp = requests.get(f"{self.sd_url}/animatediff/v1/status", timeout=5)
-            return resp.status_code == 200
-        except Exception:
-            return False
+            history = self.client.run_workflow(workflow, timeout=600)
+            import pdb; pdb.set_trace()
+            outputs = self.client.extract_outputs(history)
 
-    # ------------------------------------------------------------------ #
-    #  AnimateDiff clip generation                                          #
-    # ------------------------------------------------------------------ #
+            if not outputs:
+                print(f"  [animation] ComfyUI returned no outputs for scene {scene_num}")
+                return None
 
-    def _generate_clip_animatediff(self, prompt: str, scene_num: int, output_dir: Path) -> str | None:
-        """Generate animated clip using AnimateDiff SD extension."""
-        num_frames = self.fps * CLIP_DURATION_SECS
+            out_path = output_dir / f"scene_{scene_num:02d}.mp4"
 
-        payload = {
-            "prompt": prompt,
-            "negative_prompt": (
-                "nsfw, blurry, low quality, deformed, extra limbs, "
-                "static, frozen, no motion, ugly, text, watermark"
-            ),
-            "steps": 20,
-            "cfg_scale": 7.5,
-            "width": 512,
-            "height": 512,
-            "animatediff_enabled": True,
-            "animatediff_model": "mm_sd_v15_v2.ckpt",
-            "animatediff_motion_scale": 1.0,
-            "animatediff_video_length": num_frames,
-            "animatediff_fps": self.fps,
-            "animatediff_loop_number": 0,
-            "animatediff_closed_loop": "R-P",
-        }
+            if out_type == "video":
+                # Download MP4 directly
+                for output in outputs:
+                    if output["media_type"] in ("gifs", "videos") or \
+                       output["filename"].endswith(".mp4"):
+                        ok = self.client.download_output(
+                            output["filename"],
+                            output["subfolder"],
+                            output["type"],
+                            out_path,
+                        )
+                        if ok:
+                            return str(out_path)
 
-        resp = requests.post(
-            f"{self.sd_url}/animatediff/v1/txt2gif",
-            json=payload,
-            timeout=300,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+            elif out_type == "image":
+                # Download PNG and loop it into an MP4
+                for output in outputs:
+                    if output["media_type"] == "images" or \
+                       output["filename"].endswith(".png"):
+                        img_path = output_dir / f"scene_{scene_num:02d}_frame.png"
+                        ok = self.client.download_output(
+                            output["filename"],
+                            output["subfolder"],
+                            output["type"],
+                            img_path,
+                        )
+                        if ok:
+                            return self._image_to_clip(img_path, out_path)
 
-        # AnimateDiff returns base64 encoded gif/mp4
-        video_b64 = data.get("video") or data.get("images", [None])[0]
-        if not video_b64:
             return None
-
-        out_path = output_dir / f"scene_{scene_num:02d}.mp4"
-        with open(out_path, "wb") as f:
-            f.write(base64.b64decode(video_b64))
-
-        return str(out_path)
-
-    # ------------------------------------------------------------------ #
-    #  Deforum fallback                                                     #
-    # ------------------------------------------------------------------ #
-
-    def _generate_clip_deforum(self, prompt: str, scene_num: int, output_dir: Path) -> str | None:
-        """Fallback: use Deforum for animated clip generation."""
-        num_frames = self.fps * CLIP_DURATION_SECS
-
-        deforum_settings = {
-            "animation_mode": "2D",
-            "max_frames": num_frames,
-            "fps": self.fps,
-            "width": 512,
-            "height": 512,
-            "prompts": {
-                "0": prompt,
-                str(num_frames // 2): prompt + ", continuation",
-            },
-            "strength_schedule": "0:(0.65)",
-            "zoom": "0:(1.01)",
-            "translation_x": "0:(0)",
-            "translation_y": "0:(0)",
-            "outdir": str(output_dir),
-            "batch_name": f"scene_{scene_num:02d}",
-        }
-
-        try:
-            resp = requests.post(
-                f"{self.sd_url}/deforum_api/batches",
-                json={"deforum_settings": [deforum_settings]},
-                timeout=300,
-            )
-            resp.raise_for_status()
-            batch_id = resp.json().get("batch_id")
-
-            # Poll for completion
-            for _ in range(60):
-                time.sleep(5)
-                status_resp = requests.get(f"{self.sd_url}/deforum_api/batches/{batch_id}")
-                status = status_resp.json().get("status")
-                if status == "succeeded":
-                    break
-                elif status == "failed":
-                    return None
-
-            # Find the output file
-            mp4_files = list(output_dir.glob(f"scene_{scene_num:02d}*.mp4"))
-            return str(mp4_files[0]) if mp4_files else None
 
         except Exception as e:
-            print(f"  [animation] Deforum failed for scene {scene_num}: {e}")
+            print(f"  [animation] ComfyUI render failed for scene {scene_num}: {e}")
             return None
 
-    # ------------------------------------------------------------------ #
-    #  Static frame fallback (when no SD available)                        #
-    # ------------------------------------------------------------------ #
-
-    def _generate_static_placeholder(self, prompt: str, scene_num: int, output_dir: Path) -> str:
-        """
-        Last resort: generate a 4-second static image clip using FFmpeg.
-        This keeps the pipeline running end-to-end even without SD.
-        """
-        # First, try to get a static image from SD txt2img
-        img_path = output_dir / f"scene_{scene_num:02d}_frame.png"
-
+    def _image_to_clip(self, img_path: Path, out_path: Path) -> str | None:
+        """Loop a static image into a fixed-duration MP4."""
         try:
-            payload = {
-                "prompt": prompt,
-                "negative_prompt": "blurry, low quality, deformed",
-                "steps": 15,
-                "width": 512,
-                "height": 512,
-            }
-            resp = requests.post(f"{self.sd_url}/sdapi/v1/txt2img", json=payload, timeout=90)
-            resp.raise_for_status()
-            img_b64 = resp.json()["images"][0]
-            with open(img_path, "wb") as f:
-                f.write(base64.b64decode(img_b64))
-            print(f"  Scene {scene_num}: static SD image generated")
-        except Exception:
-            # No SD at all — create blank frame with FFmpeg
             subprocess.run([
-                "ffmpeg", "-y", "-f", "lavfi",
-                "-i", f"color=c=0x1a1a2e:size=512x512:rate={self.fps}",
-                "-t", str(CLIP_DURATION_SECS),
-                "-vf", f"drawtext=text='Scene {scene_num}':fontcolor=white:fontsize=24:x=(w-text_w)/2:y=(h-text_h)/2",
-                str(output_dir / f"scene_{scene_num:02d}.mp4"),
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-i", str(img_path),
+                "-c:v", "libx264",
+                "-t", str(CLIP_DURATION),
+                "-pix_fmt", "yuv420p",
+                "-vf", f"scale={RESOLUTION_W}:{RESOLUTION_H},fps={self.fps}",
+                str(out_path),
             ], check=True, capture_output=True)
-            print(f"  Scene {scene_num}: placeholder clip created (no SD available)")
-            return str(output_dir / f"scene_{scene_num:02d}.mp4")
+            img_path.unlink(missing_ok=True)
+            return str(out_path) if out_path.exists() else None
+        except subprocess.CalledProcessError:
+            return None
 
-        # Convert static image to short clip
-        out_path = output_dir / f"scene_{scene_num:02d}.mp4"
+    # ── FFmpeg placeholder fallback ────────────────────────────────────────
+
+    def _render_placeholder(self, scene_num: int, output_dir: Path) -> str:
+        """
+        Guaranteed fallback: coloured card with scene number.
+        Uses absolute paths and a 3-tier fallback so it never raises.
+        """
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out = output_dir / f"scene_{scene_num:02d}.mp4"
+
+        # Tier 1: coloured card (most compatible)
+        try:
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", f"color=c=0x1a1a2e:size={RESOLUTION_W}x{RESOLUTION_H}:rate={self.fps}",
+                "-t", str(CLIP_DURATION),
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                str(out),
+            ], check=True, capture_output=True)
+            return str(out)
+        except subprocess.CalledProcessError:
+            pass
+
+        # Tier 2: testsrc (always available in any FFmpeg build)
         subprocess.run([
-            "ffmpeg", "-y", "-loop", "1",
-            "-i", str(img_path),
-            "-c:v", "libx264",
-            "-t", str(CLIP_DURATION_SECS),
-            "-pix_fmt", "yuv420p",
-            "-vf", f"scale=512:512,fps={self.fps}",
-            str(out_path),
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", f"testsrc=size={RESOLUTION_W}x{RESOLUTION_H}:rate={self.fps}",
+            "-t", str(CLIP_DURATION),
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            str(out),
         ], check=True, capture_output=True)
+        return str(out)
 
-        img_path.unlink(missing_ok=True)  # clean up raw image
-        return str(out_path)
-
-    # ------------------------------------------------------------------ #
-    #  Public entrypoint                                                    #
-    # ------------------------------------------------------------------ #
+    # ── Public entrypoint ─────────────────────────────────────────────────
 
     def run(self, state: EpisodeState) -> EpisodeState:
         print("\n[4/6] Animation Agent starting...")
@@ -211,46 +195,52 @@ class AnimationAgent:
             state.add_error("animation", "No character/scene data. Run StoryCharacterAgent first.")
             return state
 
-        output_dir = Path(state.output_dir) / state.episode_id / "clips"
+        output_dir = Path(state.output_dir).resolve() / state.episode_id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Detect available backend
-        sd_up = self._sd_available()
-        animatediff_up = sd_up and self._animatediff_available()
+        backend = self._detect_backend()
+        backend_labels = {
+            "animatediff": f"ComfyUI + AnimateDiff-Evolved ({COMFYUI_URL})",
+            "comfyui":     f"ComfyUI txt2img → looped clip ({COMFYUI_URL})",
+            "ffmpeg":      "FFmpeg colour-card placeholder (ComfyUI not running)",
+        }
+        print(f"  Backend: {backend_labels[backend]}")
 
-        if animatediff_up:
-            print("  Backend: AnimateDiff (SD WebUI)")
-        elif sd_up:
-            print("  Backend: Deforum / Static frames (SD WebUI, no AnimateDiff)")
-        else:
-            print("  Backend: FFmpeg placeholders (SD not available)")
+        if backend == "animatediff":
+            checkpoints = self.client.list_checkpoints()
+            modules     = self.client.list_motion_modules()
+            print(f"  Checkpoints:    {checkpoints[:3]}")
+            print(f"  Motion modules: {modules[:3]}")
 
-        clip_paths = []
         scene_prompts = state.characters.scene_prompts
+        clip_paths    = []
 
         for i, prompt in enumerate(scene_prompts, 1):
             print(f"  Rendering scene {i}/{len(scene_prompts)}...", end=" ", flush=True)
             clip_path = None
 
             try:
-                if animatediff_up:
-                    clip_path = self._generate_clip_animatediff(prompt, i, output_dir)
-                elif sd_up:
-                    clip_path = self._generate_clip_deforum(prompt, i, output_dir)
+                if backend in ("animatediff", "comfyui"):
+                    clip_path = self._render_animatediff(prompt, i, output_dir)
 
                 if not clip_path:
-                    clip_path = self._generate_static_placeholder(prompt, i, output_dir)
+                    # Fallback: placeholder (also used when ComfyUI returns nothing)
+                    clip_path = self._render_placeholder(i, output_dir)
+                    if backend in ("animatediff", "comfyui"):
+                        state.warnings.append(
+                            f"Scene {i}: ComfyUI failed, used FFmpeg placeholder"
+                        )
 
                 clip_paths.append(clip_path)
+                src = "ComfyUI" if backend != "ffmpeg" and clip_path else "placeholder"
                 print(f"done → {Path(clip_path).name}")
 
             except Exception as e:
-                state.warnings.append(f"Scene {i} clip failed: {e}")
-                print(f"WARN: {e}")
-                # Try placeholder as last resort
+                print(f"WARN — {e}")
+                state.warnings.append(f"Scene {i} render error: {e}")
                 try:
-                    clip_path = self._generate_static_placeholder(prompt, i, output_dir)
-                    clip_paths.append(clip_path)
+                    fallback = self._render_placeholder(i, output_dir)
+                    clip_paths.append(fallback)
                 except Exception:
                     pass
 
@@ -261,13 +251,16 @@ class AnimationAgent:
             resolution=RESOLUTION,
         )
 
-        # Save manifest
-        manifest_path = output_dir / "clips_manifest.json"
-        with open(manifest_path, "w") as f:
-            json.dump({"clips": clip_paths}, f, indent=2)
+        manifest = output_dir / "clips_manifest.json"
+        with open(manifest, "w") as f:
+            json.dump({
+                "backend":  backend,
+                "clips":    clip_paths,
+                "fps":      self.fps,
+                "resolution": RESOLUTION,
+            }, f, indent=2)
 
         state.mark_done("animation")
         print(f"  Clips generated: {len(clip_paths)}/{len(scene_prompts)}")
         print("  [4/6] DONE\n")
-
         return state

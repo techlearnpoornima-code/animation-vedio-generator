@@ -197,10 +197,17 @@ async def status():
     except Exception:
         pass
 
-    sd_ok = False
+    comfy_ok = False
+    comfy_info = {}
     try:
-        r = requests.get(f"{os.getenv('SD_API_URL', 'http://localhost:7860')}/sdapi/v1/options", timeout=3)
-        sd_ok = r.status_code == 200
+        comfy_url = os.getenv("COMFYUI_URL", "http://localhost:8188")
+        r = requests.get(f"{comfy_url}/system_stats", timeout=3)
+        if r.status_code == 200:
+            comfy_ok = True
+            # Check AnimateDiff + VHS availability
+            has_anim = requests.get(f"{comfy_url}/object_info/ADE_AnimateDiffLoaderWithContext", timeout=3).status_code == 200
+            has_vhs  = requests.get(f"{comfy_url}/object_info/VHS_VideoCombine", timeout=3).status_code == 200
+            comfy_info = {"animatediff": has_anim, "vhs": has_vhs}
     except Exception:
         pass
 
@@ -208,7 +215,7 @@ async def status():
         "pipeline_running": pipeline_running,
         "current_episode_id": current_episode_id,
         "ollama": {"available": ollama_ok, "models": ollama_models},
-        "stable_diffusion": {"available": sd_ok},
+        "comfyui": {"available": comfy_ok, **comfy_info},
         "output_dir": OUTPUT_DIR,
     }
 

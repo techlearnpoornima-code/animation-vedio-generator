@@ -521,8 +521,8 @@ html, body {
         <span id="lbl-ollama">ollama</span>
       </div>
       <div class="status-chip">
-        <div class="status-dot" id="dot-sd"></div>
-        <span id="lbl-sd">sd-webui</span>
+        <div class="status-dot" id="dot-comfy"></div>
+        <span id="lbl-comfy">comfyui</span>
       </div>
       <div class="status-chip">
         <div class="status-dot" id="dot-pipeline"></div>
@@ -873,9 +873,15 @@ async function pollStatus() {
     dotO.className = `status-dot ${d.ollama.available ? 'ok' : 'err'}`;
     lblO.textContent = d.ollama.available ? `ollama (${d.ollama.models.length} models)` : 'ollama offline';
 
-    // SD
-    const dotS = document.getElementById('dot-sd');
-    dotS.className = `status-dot ${d.stable_diffusion.available ? 'ok' : 'warn'}`;
+    // ComfyUI
+    const dotS = document.getElementById('dot-comfy');
+    const lbl_comfy = document.getElementById('lbl-comfy');
+    const comfy = d.comfyui || {};
+    dotS.className = `status-dot ${comfy.available ? 'ok' : 'warn'}`;
+    const mode = comfy.available
+      ? (comfy.animatediff && comfy.vhs ? 'AnimateDiff' : 'txt2img only')
+      : 'offline';
+    lbl_comfy.textContent = `comfyui (${mode})`;
 
     // Pipeline
     if (d.pipeline_running !== pipelineRunning) {

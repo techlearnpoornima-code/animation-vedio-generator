@@ -93,10 +93,18 @@ def route_after_qa(state: dict) -> str:
     elif retries < MAX_SCRIPT_RETRIES:
         print(f"  [orchestrator] QA failed. Retrying script (attempt {retries + 1}/{MAX_SCRIPT_RETRIES})...")
         state["_script_retries"] = retries + 1
+        # Clear the broken script state so ScriptWriter starts fresh
+        state["script"] = None
+        state["errors"] = [e for e in state.get("errors", []) if "script_writer" not in e]
         return "script_writing"
     else:
-        print(f"  [orchestrator] QA failed after {MAX_SCRIPT_RETRIES} retries. Proceeding anyway.")
-        return "story_character"
+        # Check if script actually exists despite QA fail (score too low but parseable)
+        if state.get("script") is not None:
+            print(f"  [orchestrator] QA failed after {MAX_SCRIPT_RETRIES} retries but script exists — proceeding.")
+            return "story_character"
+        else:
+            print(f"  [orchestrator] QA failed after {MAX_SCRIPT_RETRIES} retries with no script. Aborting.")
+            return END
 
 
 def route_after_errors(state: dict) -> str:
@@ -135,6 +143,7 @@ def build_graph() -> StateGraph:
         {
             "story_character": "story_character",
             "script_writing":  "script_writing",
+            END:               END,
         },
     )
 

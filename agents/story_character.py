@@ -15,7 +15,7 @@ from pathlib import Path
 from pipeline.state import EpisodeState, CharacterData
 from pipeline.ollama_client import OllamaClient
 
-SD_API_URL = os.getenv("SD_API_URL", "http://localhost:7860")
+COMFYUI_URL = os.getenv("COMFYUI_URL", "http://localhost:8188")
 
 SYSTEM_PROMPT = """You are a visual development artist and character designer for animated films.
 You create detailed, consistent character designs and translate scripts into precise image generation prompts.
@@ -143,31 +143,46 @@ For EACH character return a JSON array:
     # ------------------------------------------------------------------ #
 
     def _generate_character_image(self, char: dict, style_ref: str, output_dir: Path) -> str | None:
-        """Call local Stable Diffusion API to generate a character sheet image."""
+        """Generate a character reference image via ComfyUI txt2img."""
+        from pipeline.comfyui_client import ComfyUIClient
+        from pipeline.comfyui_workflows import txt2img_workflow
+
+        img_path = output_dir / f"{char['name'].lower().replace(' ', '_')}.png"
+        char_prompt = (
+            f"{style_ref}, character reference sheet, "
+            f"{char.get('visual_prompt', char['name'])}, "
+            f"multiple poses, white background"
+        )
+
         try:
-            payload = {
-                "prompt": f"{style_ref}, character reference sheet, {char['visual_prompt']}, multiple poses, white background",
-                "negative_prompt": "nsfw, blurry, low quality, deformed, extra limbs",
-                "steps": 25,
-                "width": 512,
-                "height": 512,
-                "cfg_scale": 7,
-            }
-            resp = requests.post(f"{SD_API_URL}/sdapi/v1/txt2img", json=payload, timeout=60)
-            resp.raise_for_status()
+            comfy = ComfyUIClient(COMFYUI_URL)
+            if not comfy.is_available():
+                raise RuntimeError("ComfyUI not running")
 
-            img_data = resp.json()["images"][0]
-            img_bytes = base64.b64decode(img_data)
+            wf = txt2img_workflow(
+                prompt=char_prompt,
+                width=512, height=512,
+                filename_prefix=f"char_{char['name'].replace(' ', '_')}",
+                )
+            history = comfy.run_workflow(wf, timeout=120)
+            outputs = comfy.extract_outputs(history)
+            if not outputs:
+                raise RuntimeError("No outputs returned")
 
-            img_path = output_dir / f"{char['name'].lower().replace(' ', '_')}.png"
-            with open(img_path, "wb") as f:
-                f.write(img_bytes)
+            ok = comfy.download_output(
+                outputs[0]["filename"],
+                outputs[0]["subfolder"],
+                outputs[0]["type"],
+                img_path,
+            )
+            if not ok:
+                raise RuntimeError("Download failed")
 
-            print(f"  Character image saved → {img_path.name}")
+            print(f"  Character image → {img_path.name}")
             return str(img_path)
 
         except Exception as e:
-            print(f"  [story_character] SD unavailable, skipping image for {char['name']}: {e}")
+            print(f"  [story_character] ComfyUI unavailable, skipping image for {char['name']}: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -175,7 +190,7 @@ For EACH character return a JSON array:
     # ------------------------------------------------------------------ #
 
     def _save_characters(self, state: EpisodeState) -> None:
-        output_dir = Path(state.output_dir) / state.episode_id / "characters"
+        output_dir = Path(state.output_dir).resolve() / state.episode_id / "characters"
         output_dir.mkdir(parents=True, exist_ok=True)
 
         path = output_dir / "characters.json"
@@ -194,7 +209,7 @@ For EACH character return a JSON array:
     #  Public entrypoint                                                    #
     # ------------------------------------------------------------------ #
 
-    def run(self, state: EpisodeState, generate_images: bool = False) -> EpisodeState:
+    def run(self, state: EpisodeState, generate_images: bool = True) -> EpisodeState:
         print("\n[3/6] Story & Character Agent starting...")
 
         if not state.script:
@@ -224,12 +239,11 @@ For EACH character return a JSON array:
             )
 
             # Optionally generate character reference images via SD
-            if generate_images:
-                img_dir = Path(state.output_dir) / state.episode_id / "characters" / "images"
-                img_dir.mkdir(parents=True, exist_ok=True)
-                print("  Generating character reference images via Stable Diffusion...")
-                for char in characters:
-                    self._generate_character_image(char, style_ref, img_dir)
+            img_dir = Path(state.output_dir).resolve() / state.episode_id / "characters" / "images"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            print("  Generating character reference images via Stable Diffusion...")
+            for char in characters:
+                self._generate_character_image(char, style_ref, img_dir)
 
             self._save_characters(state)
             state.mark_done("story_character")
@@ -255,7 +269,7 @@ if __name__ == "__main__":
     state = EpisodeState(output_dir="./output")
     state = TrendResearcher().run(state)
     state = ScriptWriter().run(state)
-    state = StoryCharacterAgent().run(state, generate_images=False)
+    state = StoryCharacterAgent().run(state, generate_images=True)
 
     if state.characters:
         for c in state.characters.characters:
